@@ -1,0 +1,202 @@
+import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
+import Underline from '@tiptap/extension-underline';
+import Highlight from '@tiptap/extension-highlight';
+import Placeholder from '@tiptap/extension-placeholder';
+import { format } from 'date-fns';
+import { TaskSorter } from '../extensions/taskSorter';
+import { useStore } from '../store/useStore';
+
+const SAVE_DELAY = 1500;
+
+export default function NoteEditor() {
+  const { notes, selectedNoteId, updateNote, folders } = useStore();
+  const note = notes.find((n) => n._id === selectedNoteId);
+  const saveTimer = useRef(null);
+  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'pending' | 'saving'
+
+  const debouncedSave = useCallback(
+    (id, content, title) => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      setSaveStatus('pending');
+      saveTimer.current = setTimeout(async () => {
+        setSaveStatus('saving');
+        try {
+          await updateNote(id, { content, title });
+          setSaveStatus('saved');
+        } catch {
+          setSaveStatus('pending');
+        }
+      }, SAVE_DELAY);
+    },
+    [updateNote]
+  );
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      Underline,
+      Highlight.configure({ multicolor: false }),
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Placeholder.configure({ placeholder: 'Start typing...' }),
+      TaskSorter,
+    ],
+    content: note?.content || '',
+    onUpdate({ editor }) {
+      if (!selectedNoteId) return;
+      const html = editor.getHTML();
+      const text = editor.getText();
+      const firstLine = text.split('\n')[0]?.trim() || '';
+      const title = firstLine.slice(0, 100) || 'New note';
+      debouncedSave(selectedNoteId, html, title);
+    },
+    editorProps: {
+      attributes: { class: 'focus:outline-none' },
+    },
+  });
+
+  // Sync editor content when selected note changes
+  useEffect(() => {
+    if (!editor) return;
+    if (!note) {
+      editor.commands.setContent('', false);
+      return;
+    }
+    editor.commands.setContent(note.content || '', false);
+    setSaveStatus('saved');
+  }, [selectedNoteId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!note) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center bg-notes-bg text-notes-muted gap-2">
+        <span className="text-5xl">✏️</span>
+        <p className="text-sm font-medium">Select a note</p>
+        <p className="text-xs">or create a new one</p>
+      </div>
+    );
+  }
+
+  const folder = folders.find((f) => f._id === note.folderId);
+  const wordCount = editor?.getText().trim().split(/\s+/).filter(Boolean).length ?? 0;
+
+  return (
+    <div className="flex-1 flex flex-col h-full bg-white overflow-hidden">
+      {/* Toolbar */}
+      <div className="border-b border-notes-border px-4 py-2 flex items-center gap-0.5 flex-wrap">
+        <Btn onClick={() => editor?.chain().focus().toggleBold().run()} active={editor?.isActive('bold')} title="Bold">
+          <strong>B</strong>
+        </Btn>
+        <Btn onClick={() => editor?.chain().focus().toggleItalic().run()} active={editor?.isActive('italic')} title="Italic">
+          <em>I</em>
+        </Btn>
+        <Btn onClick={() => editor?.chain().focus().toggleUnderline().run()} active={editor?.isActive('underline')} title="Underline">
+          <span className="underline">U</span>
+        </Btn>
+        <Btn onClick={() => editor?.chain().focus().toggleStrike().run()} active={editor?.isActive('strike')} title="Strikethrough">
+          <span className="line-through">S</span>
+        </Btn>
+        <Btn onClick={() => editor?.chain().focus().toggleHighlight().run()} active={editor?.isActive('highlight')} title="Highlight">
+          <span className="bg-yellow-200 px-0.5 rounded-sm text-xs">H</span>
+        </Btn>
+
+        <Divider />
+
+        <Btn onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()} active={editor?.isActive('heading', { level: 1 })} title="Heading 1">
+          <span className="text-xs font-bold">H1</span>
+        </Btn>
+        <Btn onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} active={editor?.isActive('heading', { level: 2 })} title="Heading 2">
+          <span className="text-xs font-bold">H2</span>
+        </Btn>
+        <Btn onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()} active={editor?.isActive('heading', { level: 3 })} title="Heading 3">
+          <span className="text-xs font-bold">H3</span>
+        </Btn>
+
+        <Divider />
+
+        <Btn onClick={() => editor?.chain().focus().toggleBulletList().run()} active={editor?.isActive('bulletList')} title="Bullet list">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+          </svg>
+        </Btn>
+        <Btn onClick={() => editor?.chain().focus().toggleOrderedList().run()} active={editor?.isActive('orderedList')} title="Ordered list">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h10M7 16h10M3 8h.01M3 12h.01M3 16h.01" />
+          </svg>
+        </Btn>
+        <Btn onClick={() => editor?.chain().focus().toggleTaskList().run()} active={editor?.isActive('taskList')} title="Checklist">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </Btn>
+
+        <Divider />
+
+        <Btn onClick={() => editor?.chain().focus().toggleBlockquote().run()} active={editor?.isActive('blockquote')} title="Quote">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+          </svg>
+        </Btn>
+        <Btn onClick={() => editor?.chain().focus().toggleCodeBlock().run()} active={editor?.isActive('codeBlock')} title="Code block">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+          </svg>
+        </Btn>
+
+        <div className="flex-1" />
+
+        <span className="text-xs text-notes-muted pr-1">
+          {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'pending' ? '●' : ''}
+        </span>
+      </div>
+
+      {/* Note meta */}
+      <div className="px-8 pt-5 pb-3 border-b border-notes-border/30">
+        <div className="flex items-center gap-2 text-[11px] text-notes-muted mb-1">
+          {folder && (
+            <>
+              <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: folder.color }} />
+              <span>{folder.name}</span>
+              <span>·</span>
+            </>
+          )}
+          <span>{format(new Date(note.updatedAt), 'MMM d, yyyy · HH:mm')}</span>
+          <span>·</span>
+          <span>{wordCount} {wordCount === 1 ? 'word' : 'words'}</span>
+        </div>
+        <h1 className="text-xl font-semibold text-notes-text">{note.title}</h1>
+      </div>
+
+      {/* Editor content */}
+      <div
+        className="flex-1 overflow-y-auto px-8 py-5 cursor-text"
+        onClick={() => editor?.commands.focus()}
+      >
+        <EditorContent editor={editor} className="min-h-full" />
+      </div>
+    </div>
+  );
+}
+
+function Btn({ onClick, active, title, children }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`w-7 h-7 flex items-center justify-center rounded text-sm transition-colors ${
+        active
+          ? 'bg-notes-yellow/40 text-notes-text'
+          : 'text-notes-muted hover:bg-notes-bg hover:text-notes-text'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Divider() {
+  return <div className="w-px h-4 bg-notes-border mx-1 flex-shrink-0" />;
+}

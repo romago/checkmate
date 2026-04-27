@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: checkmate-mongo
+    restart: unless-stopped
+    # MongoDB NOT exposed to host — only reachable inside checkmate_network
+    expose:
+      - "27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: checkmate
+      MONGO_INITDB_ROOT_PASSWORD: checkmate_secret
+      MONGO_INITDB_DATABASE: checkmate
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - checkmate_network
+
+  backend:
+    build: ./backend
+    container_name: checkmate-backend
+    restart: unless-stopped
+    # Bound to 127.0.0.1 only — not reachable from outside the server
+    ports:
+      - "127.0.0.1:5010:5000"
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://checkmate:checkmate_secret@mongo:27017/checkmate?authSource=admin
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 5000
+    depends_on:
+      - mongo
+    networks:
+      - checkmate_network
+
+  frontend:
+    build: ./frontend
+    container_name: checkmate-frontend
+    restart: unless-stopped
+    # Bound to 127.0.0.1 only — not reachable from outside the server
+    ports:
+      - "127.0.0.1:3010:3000"
+    environment:
+      NODE_ENV: production
+    depends_on:
+      - backend
+    networks:
+      - checkmate_network
+
+volumes:
+  mongo_data:
+
+networks:
+  checkmate_network:
+    driver: bridge
