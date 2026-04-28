@@ -12,7 +12,7 @@ import { useStore } from '../store/useStore';
 
 const SAVE_DELAY = 1500;
 
-export default function NoteEditor() {
+export default function NoteEditor({ onBack }) {
   const { notes, selectedNoteId, updateNote, folders } = useStore();
   const note = notes.find((n) => n._id === selectedNoteId);
   const saveTimer = useRef(null);
@@ -72,10 +72,20 @@ export default function NoteEditor() {
 
   if (!note) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-notes-bg text-notes-muted gap-2">
-        <span className="text-5xl">✏️</span>
-        <p className="text-sm font-medium">Select a note</p>
-        <p className="text-xs">or create a new one</p>
+      <div className="flex-1 flex flex-col bg-notes-bg">
+        <div className="md:hidden flex items-center px-4 pt-4 pb-2">
+          <button onClick={onBack} className="flex items-center gap-1 text-notes-muted text-sm">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Notes
+          </button>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center text-notes-muted gap-2">
+          <span className="text-5xl">✏️</span>
+          <p className="text-sm font-medium">Select a note</p>
+          <p className="text-xs">or create a new one</p>
+        </div>
       </div>
     );
   }
@@ -86,10 +96,20 @@ export default function NoteEditor() {
   return (
     <div className="flex-1 flex flex-col h-full bg-white overflow-hidden">
       {/* Toolbar */}
-      <div className="border-b border-notes-border px-4 py-2 flex items-center gap-0.5 flex-wrap">
-        <Btn onClick={() => editor?.chain().focus().toggleBold().run()} active={editor?.isActive('bold')} title="Bold">
-          <strong>B</strong>
-        </Btn>
+      <div className="border-b border-notes-border flex items-stretch">
+        <div className="flex items-center gap-0.5 px-2 py-2 overflow-x-auto no-scrollbar flex-1">
+          {/* Mobile back button */}
+          <button
+            onClick={onBack}
+            className="md:hidden flex items-center gap-0.5 text-notes-muted pr-2 mr-0.5 border-r border-notes-border flex-shrink-0"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <Btn onClick={() => editor?.chain().focus().toggleBold().run()} active={editor?.isActive('bold')} title="Bold">
+            <strong>B</strong>
+          </Btn>
         <Btn onClick={() => editor?.chain().focus().toggleItalic().run()} active={editor?.isActive('italic')} title="Italic">
           <em>I</em>
         </Btn>
@@ -146,15 +166,15 @@ export default function NoteEditor() {
           </svg>
         </Btn>
 
-        <div className="flex-1" />
-
-        <span className="text-xs text-notes-muted pr-1">
+          <div className="flex-shrink-0 w-2" />
+        </div>
+        <div className="flex items-center px-2 flex-shrink-0 text-xs text-notes-muted border-l border-notes-border/50">
           {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'pending' ? '●' : ''}
-        </span>
+        </div>
       </div>
 
       {/* Note meta */}
-      <div className="px-8 pt-5 pb-3 border-b border-notes-border/30">
+      <div className="px-4 md:px-8 pt-5 pb-3 border-b border-notes-border/30">
         <div className="flex items-center gap-2 text-[11px] text-notes-muted mb-1">
           {folder && (
             <>
@@ -172,7 +192,7 @@ export default function NoteEditor() {
 
       {/* Editor content */}
       <div
-        className="flex-1 overflow-y-auto px-8 py-5 cursor-text"
+        className="flex-1 overflow-y-auto px-4 md:px-8 py-5 pb-20 md:pb-5 cursor-text"
         onClick={() => editor?.commands.focus()}
       >
         <EditorContent editor={editor} className="min-h-full" />

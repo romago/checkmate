@@ -2,7 +2,7 @@ import { useStore } from '../store/useStore';
 import { formatDistanceToNow } from 'date-fns';
 
 
-export default function NotesList() {
+export default function NotesList({ onNoteSelect, onBack }) {
   const {
     notes,
     selectedNoteId,
@@ -31,11 +31,21 @@ export default function NotesList() {
   };
 
   return (
-    <div className="w-72 flex-shrink-0 border-r border-notes-border flex flex-col h-full bg-white">
+    <div className="w-full md:w-72 flex-shrink-0 border-r border-notes-border flex flex-col h-full bg-white">
       {/* Header */}
       <div className="px-4 pt-5 pb-3">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold text-notes-text truncate">{title}</h2>
+          <div className="flex items-center gap-1 min-w-0">
+            <button
+              onClick={onBack}
+              className="md:hidden flex-shrink-0 w-8 h-8 flex items-center justify-center text-notes-muted"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <h2 className="font-semibold text-notes-text truncate">{title}</h2>
+          </div>
           <button
             onClick={() => createNote(selectedFolderId)}
             title="New note"
@@ -67,7 +77,7 @@ export default function NotesList() {
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto pb-14 md:pb-0">
         {notes.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-notes-muted text-sm gap-2 pb-16">
             <span className="text-3xl">📝</span>
@@ -90,7 +100,7 @@ export default function NotesList() {
                     note={note}
                     active={note._id === selectedNoteId}
                     preview={extractPreview(note.content)}
-                    onClick={() => setSelectedNote(note._id)}
+                    onClick={() => { setSelectedNote(note._id); onNoteSelect?.(); }}
                     onPin={() => pinNote(note._id)}
                     onDelete={() => deleteNote(note._id)}
                   />
@@ -104,7 +114,7 @@ export default function NotesList() {
                 note={note}
                 active={note._id === selectedNoteId}
                 preview={extractPreview(note.content)}
-                onClick={() => setSelectedNote(note._id)}
+                onClick={() => { setSelectedNote(note._id); onNoteSelect?.(); }}
                 onPin={() => pinNote(note._id)}
                 onDelete={() => deleteNote(note._id)}
               />
@@ -141,8 +151,8 @@ function NoteItem({ note, active, preview, onClick, onPin, onDelete }) {
         <span className="text-[11px] text-notes-muted truncate">{preview}</span>
       </div>
 
-      {/* Actions (visible on hover) */}
-      <div className="absolute top-2 right-2 hidden group-hover:flex items-center gap-0.5">
+      {/* Actions - always visible on mobile, hover-only on desktop */}
+      <div className="absolute top-2 right-2 flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
         <button
           onClick={(e) => { e.stopPropagation(); onPin(); }}
           title={note.isPinned ? 'Unpin' : 'Pin'}
@@ -167,7 +177,7 @@ function NoteItem({ note, active, preview, onClick, onPin, onDelete }) {
       </div>
 
       {note.isPinned && !active && (
-        <span className="absolute top-2.5 right-2 text-[11px] group-hover:hidden">📌</span>
+        <span className="hidden md:block absolute top-2.5 right-2 text-[11px] md:group-hover:hidden">📌</span>
       )}
     </div>
   );

@@ -7,7 +7,7 @@ const COLORS = [
   '#30D158', '#0A84FF', '#5E5CE6', '#BF5AF2',
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ onFolderSelect }) {
   const {
     folders,
     selectedFolderId,
@@ -45,7 +45,7 @@ export default function Sidebar() {
   };
 
   return (
-    <div className="w-56 flex-shrink-0 bg-notes-sidebar border-r border-notes-border flex flex-col h-full select-none">
+    <div className="w-full md:w-56 flex-shrink-0 bg-notes-sidebar border-r border-notes-border flex flex-col h-full select-none">
       {/* User header */}
       <div className="px-4 pt-5 pb-3 flex items-center gap-2">
         <div className="w-7 h-7 rounded-full bg-notes-yellow flex items-center justify-center text-xs font-bold flex-shrink-0">
@@ -78,14 +78,14 @@ export default function Sidebar() {
         </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2 pb-4 space-y-0.5">
+      <nav className="flex-1 overflow-y-auto px-2 pb-20 md:pb-4 space-y-0.5">
         {/* All Notes */}
         <NavItem
           emoji="📋"
           label="All Notes"
           count={getCount('all')}
           active={selectedFolderId === 'all'}
-          onClick={() => setSelectedFolder('all')}
+          onClick={() => { setSelectedFolder('all'); onFolderSelect?.(); }}
         />
 
         <div className="my-2 border-t border-notes-border/60" />
@@ -136,7 +136,7 @@ export default function Sidebar() {
                 label={folder.name}
                 count={getCount(folder._id)}
                 active={selectedFolderId === folder._id}
-                onClick={() => setSelectedFolder(folder._id)}
+                onClick={() => { setSelectedFolder(folder._id); onFolderSelect?.(); }}
                 onDoubleClick={() => { setEditingId(folder._id); setEditingName(folder.name); }}
                 action={
                   <button
