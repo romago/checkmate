@@ -74,15 +74,27 @@ export default function NoteEditor({ onBack }) {
 
   // Mobile: single tap on task text = nothing; double tap = edit (keyboard)
   useEffect(() => {
-    const wrap = editorWrapRef.current;
-    if (!wrap) return;
+    if (!editor) return;
+    // Must attach to the actual contenteditable DOM in capture phase
+    // so our handler fires before ProseMirror's pointerdown handler
+    const dom = editor.view.dom;
 
-    const onTouchStart = (e) => {
+    const handler = (e) => {
       const target = e.target;
       const taskItem = target.closest('li[data-type="taskItem"]');
       if (!taskItem) return;
-      // Checkbox input or its <label> — always let through
-      if (target.tagName === 'INPUT' || target.closest('label')) return;
+      // Checkbox <input> or its <label>
+      if (target.tagName === 'INPUT' || target.closest('label')) {
+        // In Chrome DevTools touch simulation, ProseMirror calls preventDefault() on
+        // pointerdown which suppresses the synthetic click — checkbox never toggles.
+        // On touchstart we prevent the broken click chain and trigger the toggle manually.
+        if (e.type === 'touchstart') {
+          e.preventDefault();
+          const checkbox = taskItem.querySelector('input[type="checkbox"]');
+          if (checkbox) setTimeout(() => checkbox.click(), 0);
+        }
+        return;
+      }
 
       const now = Date.now();
       const tap = tapRef.current;
@@ -94,11 +106,18 @@ export default function NoteEditor({ onBack }) {
         tap.time = 0; // reset so triple-tap isn't another double
         return; // allow focus + keyboard
       }
-      e.preventDefault(); // block keyboard on single tap
+      // Block cursor placement and keyboard on single tap
+      e.preventDefault();
+      e.stopPropagation();
     };
 
-    wrap.addEventListener('touchstart', onTouchStart, { passive: false });
-    return () => wrap.removeEventListener('touchstart', onTouchStart);
+    // Block both pointerdown (used by ProseMirror) and touchstart, capture phase
+    dom.addEventListener('pointerdown', handler, { passive: false, capture: true });
+    dom.addEventListener('touchstart', handler, { passive: false, capture: true });
+    return () => {
+      dom.removeEventListener('pointerdown', handler, { capture: true });
+      dom.removeEventListener('touchstart', handler, { capture: true });
+    };
   }, [editor]);
 
   if (!note) {
