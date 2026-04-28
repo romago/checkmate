@@ -18,10 +18,20 @@ export default function NoteEditor({ onBack, isEditMode = true }) {
   const saveTimer = useRef(null);
   const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'pending' | 'saving'
   const editorWrapRef = useRef(null);
-  // isDesktop never changes after mount — used to skip mobile-only logic on desktop
-  const isDesktop = useRef(window.matchMedia('(min-width: 768px)').matches).current;
-  // viewMode: mobile + note is open for reading, not editing
-  const viewMode = !isEditMode && !isDesktop;
+
+  // Reactive isMobileWidth — updates on DevTools resize and device orientation
+  const [isMobileWidth, setIsMobileWidth] = useState(
+    () => !window.matchMedia('(min-width: 768px)').matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const onChange = (e) => setIsMobileWidth(!e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  // viewMode = mobile-width + note open for reading, not editing
+  const viewMode = isMobileWidth && !isEditMode;
 
   const debouncedSave = useCallback(
     (id, content, title) => {
@@ -75,51 +85,97 @@ export default function NoteEditor({ onBack, isEditMode = true }) {
     setSaveStatus('saved');
   }, [selectedNoteId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync ProseMirror editable flag with view/edit mode.
-  // contenteditable=false prevents keyboard without breaking scroll.
+  // ─── View mode: block keyboard + allow checkbox toggles ─────────────────
+  //
+  // Strategy:
+  //   1. editor.setEditable(false) → sets contenteditable="false" on .ProseMirror
+  //      → tapping text never focuses the editor → keyboard never appears.
+  //      Native <input type="checkbox"> elements are NOT affected by contenteditable
+  //      and remain clickable.
+  //
+  //   2. TipTap's TaskItem NodeView has a `change` listener on the checkbox that
+  //      does `if (!view.editable) { checkbox.checked = !checkbox.checked; return }`
+  //      — it REVERTS the user's tap. We intercept in capture phase (which runs
+  //      top-down, BEFORE the element's own listeners) and call stopPropagation()
+  //      so TipTap's handler never fires.
+  //
+  //   3. We then dispatch our own setNodeMarkup transaction to toggle the state.
+  //      Index-based node lookup (querySelectorAll + doc.descendants) is used
+  //      because PM node identity and posAtDOM are unreliable.
   useEffect(() => {
     if (!editor) return;
-    editor.setEditable(isEditMode || isDesktop);
-  }, [editor, isEditMode]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Keep editor.editable in sync with viewMode
+    editor.setEditable(!viewMode);
 
-  // View mode (mobile): tapping any part of a task item toggles its checkbox.
-  useEffect(() => {
-    if (!editor || isEditMode || isDesktop) return;
-    const { view } = editor;
+    if (!viewMode) return;
 
-    const handlePointerDown = (e) => {
-      const taskItemEl = e.target.closest('li[data-type="taskItem"]');
-      if (!taskItemEl) return;
+    const dom = editor.view.dom;
 
-      // Prevent ProseMirror and browser from handling this tap
-      e.preventDefault();
-      e.stopPropagation();
-
-      // Find the ProseMirror node position by comparing actual DOM nodes.
-      // posAtDOM is unreliable with contenteditable=false — nodeDOM is direct.
-      const state = view.state;
+    // Helper: find PM node by DOM index and toggle it
+    const toggleByEl = (taskItemEl, newChecked) => {
+      const allItems = dom.querySelectorAll('li[data-type="taskItem"]');
+      const idx = Array.from(allItems).indexOf(taskItemEl);
+      if (idx === -1) return;
+      let counter = 0;
       let found = null;
-      state.doc.descendants((node, pos) => {
-        if (found !== null) return false;
-        if (node.type.name === 'taskItem' && view.nodeDOM(pos) === taskItemEl) {
-          found = { node, pos };
-          return false;
+      editor.state.doc.descendants((node, pos) => {
+        if (found) return false;
+        if (node.type.name === 'taskItem') {
+          if (counter === idx) { found = { node, pos }; return false; }
+          counter++;
         }
       });
-
       if (!found) return;
-
-      view.dispatch(
-        state.tr.setNodeMarkup(found.pos, null, {
+      editor.view.dispatch(
+        editor.view.state.tr.setNodeMarkup(found.pos, null, {
           ...found.node.attrs,
-          checked: !found.node.attrs.checked,
+          checked: newChecked,
         })
       );
     };
 
-    view.dom.addEventListener('pointerdown', handlePointerDown, { passive: false, capture: true });
-    return () => view.dom.removeEventListener('pointerdown', handlePointerDown, { capture: true });
-  }, [editor, isEditMode]); // eslint-disable-line react-hooks/exhaustive-deps
+    // `change` fires when the native <input type="checkbox"> is toggled.
+    // capture=true: runs before TipTap's own handler which would revert the change.
+    const onCheckboxChange = (e) => {
+      const checkbox = e.target;
+      if (checkbox.type !== 'checkbox') return;
+      e.stopPropagation(); // prevent TipTap's revert
+      const taskItemEl = checkbox.closest('li[data-type="taskItem"]');
+      if (!taskItemEl) return;
+      // checkbox.checked is already the new value the browser set
+      toggleByEl(taskItemEl, checkbox.checked);
+    };
+
+    // `click` fires when the user taps text/label content inside a task item.
+    // The checkbox input already handled above via `change`; skip those.
+    const onTaskContentClick = (e) => {
+      const taskItemEl = e.target.closest('li[data-type="taskItem"]');
+      if (!taskItemEl) return;
+      // Skip clicks on the checkbox <input> itself — handled by `change`
+      if (e.target.closest('label')) return;
+      // Current checked state comes from the PM node attr (not DOM, which isn't updated yet)
+      const allItems = dom.querySelectorAll('li[data-type="taskItem"]');
+      const idx = Array.from(allItems).indexOf(taskItemEl);
+      if (idx === -1) return;
+      let counter = 0;
+      let curChecked = false;
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === 'taskItem') {
+          if (counter === idx) { curChecked = node.attrs.checked; return false; }
+          counter++;
+        }
+      });
+      toggleByEl(taskItemEl, !curChecked);
+    };
+
+    dom.addEventListener('change', onCheckboxChange, true);
+    dom.addEventListener('click', onTaskContentClick, true);
+    return () => {
+      dom.removeEventListener('change', onCheckboxChange, true);
+      dom.removeEventListener('click', onTaskContentClick, true);
+      editor.setEditable(true);
+    };
+  }, [editor, viewMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!note) {
     return (
@@ -244,7 +300,7 @@ export default function NoteEditor({ onBack, isEditMode = true }) {
       {/* Editor content */}
       <div
         ref={editorWrapRef}
-        className="flex-1 overflow-y-auto px-4 md:px-8 py-5 pb-20 md:pb-5 cursor-text"
+        className={`flex-1 overflow-y-auto px-4 md:px-8 py-5 pb-20 md:pb-5 ${viewMode ? 'cursor-default' : 'cursor-text'}`}
         onClick={() => { if (!viewMode) editor?.commands.focus(); }}
       >
         <EditorContent editor={editor} className="min-h-full" />
