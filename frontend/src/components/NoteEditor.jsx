@@ -12,13 +12,16 @@ import { useStore } from '../store/useStore';
 
 const SAVE_DELAY = 1500;
 
-export default function NoteEditor({ onBack }) {
+export default function NoteEditor({ onBack, isEditMode = true }) {
   const { notes, selectedNoteId, updateNote, folders } = useStore();
   const note = notes.find((n) => n._id === selectedNoteId);
   const saveTimer = useRef(null);
   const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'pending' | 'saving'
   const editorWrapRef = useRef(null);
-  const tapRef = useRef({ time: 0, el: null });
+  // isDesktop never changes after mount — used to skip mobile-only logic on desktop
+  const isDesktop = useRef(window.matchMedia('(min-width: 768px)').matches).current;
+  // viewMode: mobile + note is open for reading, not editing
+  const viewMode = !isEditMode && !isDesktop;
 
   const debouncedSave = useCallback(
     (id, content, title) => {
@@ -72,56 +75,51 @@ export default function NoteEditor({ onBack }) {
     setSaveStatus('saved');
   }, [selectedNoteId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Mobile: single tap on task item (text or checkbox area) = toggle checkbox;
-  //         double tap on task item text = edit (keyboard).
+  // Sync ProseMirror editable flag with view/edit mode.
+  // contenteditable=false prevents keyboard without breaking scroll.
   useEffect(() => {
     if (!editor) return;
-    const dom = editor.view.dom;
+    editor.setEditable(isEditMode || isDesktop);
+  }, [editor, isEditMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const handler = (e) => {
-      // Only intercept touch input — leave mouse/trackpad alone
-      if (e.pointerType !== 'touch') return;
+  // View mode (mobile): tapping any part of a task item toggles its checkbox.
+  useEffect(() => {
+    if (!editor || isEditMode || isDesktop) return;
+    const { view } = editor;
 
-      const target = e.target;
-      const taskItem = target.closest('li[data-type="taskItem"]');
-      if (!taskItem) return;
+    const handlePointerDown = (e) => {
+      const taskItemEl = e.target.closest('li[data-type="taskItem"]');
+      if (!taskItemEl) return;
 
-      const isCheckboxArea = target.tagName === 'INPUT' || target.closest('label');
-
-      if (isCheckboxArea) {
-        // ProseMirror's preventDefault on pointerdown suppresses the synthetic click,
-        // so the checkbox never toggles. Prevent default and fire click manually.
-        e.preventDefault();
-        const checkbox = taskItem.querySelector('input[type="checkbox"]');
-        if (checkbox) setTimeout(() => checkbox.click(), 0);
-        return;
-      }
-
-      // Tapping on the task item text
-      const now = Date.now();
-      const tap = tapRef.current;
-      const isDouble = now - tap.time < 350 && tap.el === taskItem;
-      tap.time = now;
-      tap.el = taskItem;
-
-      if (isDouble) {
-        tap.time = 0; // reset so triple-tap isn't another double
-        return; // allow focus + keyboard for editing
-      }
-
-      // Single tap on text: toggle checkbox, no keyboard
+      // Prevent ProseMirror and browser from handling this tap
       e.preventDefault();
       e.stopPropagation();
-      const checkbox = taskItem.querySelector('input[type="checkbox"]');
-      if (checkbox) setTimeout(() => checkbox.click(), 0);
+
+      // Find the ProseMirror node position by comparing actual DOM nodes.
+      // posAtDOM is unreliable with contenteditable=false — nodeDOM is direct.
+      const state = view.state;
+      let found = null;
+      state.doc.descendants((node, pos) => {
+        if (found !== null) return false;
+        if (node.type.name === 'taskItem' && view.nodeDOM(pos) === taskItemEl) {
+          found = { node, pos };
+          return false;
+        }
+      });
+
+      if (!found) return;
+
+      view.dispatch(
+        state.tr.setNodeMarkup(found.pos, null, {
+          ...found.node.attrs,
+          checked: !found.node.attrs.checked,
+        })
+      );
     };
 
-    // Capture phase so we fire before ProseMirror's own pointerdown handler
-    dom.addEventListener('pointerdown', handler, { passive: false, capture: true });
-    return () => {
-      dom.removeEventListener('pointerdown', handler, { capture: true });
-    };
-  }, [editor]);
+    view.dom.addEventListener('pointerdown', handlePointerDown, { passive: false, capture: true });
+    return () => view.dom.removeEventListener('pointerdown', handlePointerDown, { capture: true });
+  }, [editor, isEditMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!note) {
     return (
@@ -148,8 +146,8 @@ export default function NoteEditor({ onBack }) {
 
   return (
     <div className="flex-1 flex flex-col h-full bg-white overflow-hidden">
-      {/* Toolbar */}
-      <div className="border-b border-notes-border flex items-stretch">
+      {/* Toolbar — hidden on mobile in view mode */}
+      <div className={`border-b border-notes-border items-stretch ${viewMode ? 'hidden md:flex' : 'flex'}`}>
         <div className="flex items-center gap-0.5 px-2 py-2 overflow-x-auto no-scrollbar flex-1">
           {/* Mobile back button */}
           <button
@@ -247,7 +245,7 @@ export default function NoteEditor({ onBack }) {
       <div
         ref={editorWrapRef}
         className="flex-1 overflow-y-auto px-4 md:px-8 py-5 pb-20 md:pb-5 cursor-text"
-        onClick={() => editor?.commands.focus()}
+        onClick={() => { if (!viewMode) editor?.commands.focus(); }}
       >
         <EditorContent editor={editor} className="min-h-full" />
       </div>
