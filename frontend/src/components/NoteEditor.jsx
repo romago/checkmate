@@ -8,7 +8,6 @@ import Highlight from '@tiptap/extension-highlight';
 import Placeholder from '@tiptap/extension-placeholder';
 import { format } from 'date-fns';
 import { TaskSorter } from '../extensions/taskSorter';
-import { TaskItemMobileTap } from '../extensions/taskItemMobileTap';
 import { useStore } from '../store/useStore';
 
 const SAVE_DELAY = 1500;
@@ -18,6 +17,8 @@ export default function NoteEditor({ onBack }) {
   const note = notes.find((n) => n._id === selectedNoteId);
   const saveTimer = useRef(null);
   const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'pending' | 'saving'
+  const editorWrapRef = useRef(null);
+  const tapRef = useRef({ time: 0, el: null });
 
   const debouncedSave = useCallback(
     (id, content, title) => {
@@ -45,7 +46,6 @@ export default function NoteEditor({ onBack }) {
       TaskItem.configure({ nested: true }),
       Placeholder.configure({ placeholder: 'Start typing...' }),
       TaskSorter,
-      TaskItemMobileTap,
     ],
     content: note?.content || '',
     onUpdate({ editor }) {
@@ -71,6 +71,35 @@ export default function NoteEditor({ onBack }) {
     editor.commands.setContent(note.content || '', false);
     setSaveStatus('saved');
   }, [selectedNoteId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Mobile: single tap on task text = nothing; double tap = edit (keyboard)
+  useEffect(() => {
+    const wrap = editorWrapRef.current;
+    if (!wrap) return;
+
+    const onTouchStart = (e) => {
+      const target = e.target;
+      const taskItem = target.closest('li[data-type="taskItem"]');
+      if (!taskItem) return;
+      // Checkbox input or its <label> — always let through
+      if (target.tagName === 'INPUT' || target.closest('label')) return;
+
+      const now = Date.now();
+      const tap = tapRef.current;
+      const isDouble = now - tap.time < 350 && tap.el === taskItem;
+      tap.time = now;
+      tap.el = taskItem;
+
+      if (isDouble) {
+        tap.time = 0; // reset so triple-tap isn't another double
+        return; // allow focus + keyboard
+      }
+      e.preventDefault(); // block keyboard on single tap
+    };
+
+    wrap.addEventListener('touchstart', onTouchStart, { passive: false });
+    return () => wrap.removeEventListener('touchstart', onTouchStart);
+  }, [editor]);
 
   if (!note) {
     return (
@@ -194,6 +223,7 @@ export default function NoteEditor({ onBack }) {
 
       {/* Editor content */}
       <div
+        ref={editorWrapRef}
         className="flex-1 overflow-y-auto px-4 md:px-8 py-5 pb-20 md:pb-5 cursor-text"
         onClick={() => editor?.commands.focus()}
       >
