@@ -111,68 +111,88 @@ export default function NoteEditor({ onBack, isEditMode = true }) {
 
     const dom = editor.view.dom;
 
-    // Helper: find PM node by DOM index and toggle it
-    const toggleByEl = (taskItemEl, newChecked) => {
-      const allItems = dom.querySelectorAll('li[data-type="taskItem"]');
-      const idx = Array.from(allItems).indexOf(taskItemEl);
-      if (idx === -1) return;
-      let counter = 0;
-      let found = null;
-      editor.state.doc.descendants((node, pos) => {
-        if (found) return false;
-        if (node.type.name === 'taskItem') {
-          if (counter === idx) { found = { node, pos }; return false; }
-          counter++;
+    // Helper: resolve the task item <li> from a target element.
+    // TipTap does NOT always add data-type="taskItem" to <li> when editable=false,
+    // so we match any <li> that is a direct child of ul[data-type="taskList"].
+    const getTaskItemEl = (target) => {
+      const li = target.closest('li');
+      if (!li) return null;
+      if (li.parentElement?.matches('ul[data-type="taskList"]')) return li;
+      return null;
+    };
+
+    // Resolve PM node position from the task item's contentDOM (<div> inside <li>).
+    // posAtDOM on the content div is reliable: it's in PM's DOM map even when editable=false.
+    // We avoid counter-based indexing entirely — it breaks when PM state order ≠ DOM order.
+    const getTaskItemPMNode = (taskItemEl) => {
+      // TipTap TaskItem NodeView: <li> → <label><input></label> + <div contenteditable>
+      const contentDiv = taskItemEl.querySelector(':scope > div');
+      if (!contentDiv) {
+        console.error('[toggle] no contentDiv in', taskItemEl.outerHTML.slice(0, 120));
+        return null;
+      }
+      let pmPos;
+      try {
+        pmPos = editor.view.posAtDOM(contentDiv, 0);
+      } catch (err) {
+        console.error('[toggle] posAtDOM threw:', err.message);
+        return null;
+      }
+      const $pos = editor.state.doc.resolve(pmPos);
+      for (let d = $pos.depth; d >= 0; d--) {
+        if ($pos.node(d).type.name === 'taskItem') {
+          return { node: $pos.node(d), pos: $pos.before(d) };
         }
-      });
+      }
+      console.error('[toggle] taskItem not found at pmPos', pmPos);
+      return null;
+    };
+
+    const toggleTaskItem = (taskItemEl, newChecked) => {
+      const found = getTaskItemPMNode(taskItemEl);
       if (!found) return;
+      console.log('[toggle] dispatching checked:', found.node.attrs.checked, '→', newChecked);
       editor.view.dispatch(
-        editor.view.state.tr.setNodeMarkup(found.pos, null, {
-          ...found.node.attrs,
-          checked: newChecked,
-        })
+        editor.view.state.tr.setNodeMarkup(found.pos, null, { ...found.node.attrs, checked: newChecked })
       );
     };
 
-    // `change` fires when the native <input type="checkbox"> is toggled.
-    // capture=true: runs before TipTap's own handler which would revert the change.
+    // `change` fires when the native checkbox is toggled. capture=true runs before
+    // TipTap's own handler which would revert the change when editable=false.
     const onCheckboxChange = (e) => {
       const checkbox = e.target;
       if (checkbox.type !== 'checkbox') return;
-      e.stopPropagation(); // prevent TipTap's revert
-      const taskItemEl = checkbox.closest('li[data-type="taskItem"]');
+      e.stopPropagation();
+      const taskItemEl = getTaskItemEl(checkbox);
       if (!taskItemEl) return;
-      // checkbox.checked is already the new value the browser set
-      toggleByEl(taskItemEl, checkbox.checked);
+      toggleTaskItem(taskItemEl, checkbox.checked);
     };
 
-    // `click` fires when the user taps text/label content inside a task item.
-    // The checkbox input already handled above via `change`; skip those.
-    const onTaskContentClick = (e) => {
-      const taskItemEl = e.target.closest('li[data-type="taskItem"]');
+    let touchStartX = 0;
+    let touchStartY = 0;
+    const onTextTouchStart = (e) => {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    };
+    const onTextTouchEnd = (e) => {
+      const t = e.changedTouches[0];
+      if (Math.abs(t.clientX - touchStartX) > 10 || Math.abs(t.clientY - touchStartY) > 10) return;
+      if (e.target.tagName === 'INPUT' || e.target.closest('label')) return;
+      const taskItemEl = getTaskItemEl(e.target);
       if (!taskItemEl) return;
-      // Skip clicks on the checkbox <input> itself — handled by `change`
-      if (e.target.closest('label')) return;
-      // Current checked state comes from the PM node attr (not DOM, which isn't updated yet)
-      const allItems = dom.querySelectorAll('li[data-type="taskItem"]');
-      const idx = Array.from(allItems).indexOf(taskItemEl);
-      if (idx === -1) return;
-      let counter = 0;
-      let curChecked = false;
-      editor.state.doc.descendants((node, pos) => {
-        if (node.type.name === 'taskItem') {
-          if (counter === idx) { curChecked = node.attrs.checked; return false; }
-          counter++;
-        }
-      });
-      toggleByEl(taskItemEl, !curChecked);
+      const found = getTaskItemPMNode(taskItemEl);
+      if (!found) return;
+      console.log('[touchend text] curChecked:', found.node.attrs.checked, '→', !found.node.attrs.checked);
+      toggleTaskItem(taskItemEl, !found.node.attrs.checked);
     };
 
     dom.addEventListener('change', onCheckboxChange, true);
-    dom.addEventListener('click', onTaskContentClick, true);
+    dom.addEventListener('touchstart', onTextTouchStart, { passive: true });
+    dom.addEventListener('touchend', onTextTouchEnd);
     return () => {
       dom.removeEventListener('change', onCheckboxChange, true);
-      dom.removeEventListener('click', onTaskContentClick, true);
+      dom.removeEventListener('touchstart', onTextTouchStart);
+      dom.removeEventListener('touchend', onTextTouchEnd);
       editor.setEditable(true);
     };
   }, [editor, viewMode]); // eslint-disable-line react-hooks/exhaustive-deps
