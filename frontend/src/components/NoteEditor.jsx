@@ -8,6 +8,7 @@ import Highlight from '@tiptap/extension-highlight';
 import Placeholder from '@tiptap/extension-placeholder';
 import { format } from 'date-fns';
 import { TaskSorter } from '../extensions/taskSorter';
+import { TaskItemMobileTap } from '../extensions/taskItemMobileTap';
 import { useStore } from '../store/useStore';
 
 const SAVE_DELAY = 1500;
@@ -44,6 +45,7 @@ export default function NoteEditor({ onBack }) {
       TaskItem.configure({ nested: true }),
       Placeholder.configure({ placeholder: 'Start typing...' }),
       TaskSorter,
+      TaskItemMobileTap,
     ],
     content: note?.content || '',
     onUpdate({ editor }) {

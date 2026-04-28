@@ -13,7 +13,6 @@ export const TaskSorter = Extension.create({
     return [
       new Plugin({
         appendTransaction(transactions, _oldState, newState) {
-          // Skip if nothing changed or if this is already our own sort transaction
           if (!transactions.some((tr) => tr.docChanged)) return null;
           if (transactions.some((tr) => tr.getMeta('taskSort'))) return null;
 
@@ -25,30 +24,23 @@ export const TaskSorter = Extension.create({
             const items = [];
             node.forEach((child) => items.push(child));
 
-            // Detect if any checked item comes before an unchecked one
             let seenChecked = false;
             let needsSort = false;
             for (const item of items) {
-              if (item.attrs.checked) {
-                seenChecked = true;
-              } else if (seenChecked) {
-                needsSort = true;
-                break;
-              }
+              if (item.attrs.checked) seenChecked = true;
+              else if (seenChecked) { needsSort = true; break; }
             }
 
             if (needsSort) {
               const unchecked = items.filter((i) => !i.attrs.checked);
               const checked = items.filter((i) => i.attrs.checked);
-              const sorted = [...unchecked, ...checked];
-              const newList = node.type.create(node.attrs, sorted);
+              const newList = node.type.create(node.attrs, [...unchecked, ...checked]);
               replacements.push({ from: pos, to: pos + node.nodeSize, node: newList });
             }
           });
 
           if (replacements.length === 0) return null;
 
-          // Apply in reverse order to keep positions valid
           const tr = newState.tr;
           [...replacements].reverse().forEach(({ from, to, node }) => {
             tr.replaceWith(from, to, node);
